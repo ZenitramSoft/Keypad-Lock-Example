@@ -1,0 +1,285 @@
+-- UCI Layer Selector Plugin
+-- A one-of-N radio selector that drives a native Q-SYS "UCI Layer Controller"
+-- component (the one where you set the UCI + Page in its properties before
+-- deploy). That component exposes each layer as "<Layer>.visibility" (Boolean)
+-- and "<Layer>.transition" (String). Give it script access and this plugin
+-- finds it, reads the layer names, and fills every button's dropdown - no UCI or
+-- page names to type, no Uci.SetLayerVisibility.
+--
+--   * Pick the Layer Controller up top (auto-found via script access).
+--   * Each button picks its layer(s) from the dropdown (with -- none --).
+--   * Press a button -> its layers.visibility go true, everybody else's false.
+--   * Exactly one hot at a time (sticky radio, or allow-deselect).
+--   * Boolean in/out (Select) + trigger in + trigger out per button.
+--
+-- Legends/styling stay on the UCI - this only flips visibility booleans.
+
+PluginInfo = {
+  Name = "Tech Tools~UCI Layer Selector",
+  Version = "3.1.0",
+  Id = "e28f4a17-9c63-4d5b-8e21-7b3a6f9c2d84",
+  Author = "JSON",
+  Description = "Radio selector that drives a native UCI Layer Controller component. Auto-finds the controller and its layers via script access; each button picks layer(s) from a dropdown, one hot at a time. Boolean + trigger in/out per button.",
+  ShowDebug = true,
+}
+
+function GetColor(props)
+  return { 70, 55, 95 }
+end
+
+function GetPrettyName(props)
+  return "UCI Layer Selector " .. PluginInfo.Version
+end
+
+function GetProperties()
+  return {
+    { Name = "Button Count",      Type = "integer", Min = 1, Max = 32, Value = 7 },
+    { Name = "Layers Per Button", Type = "integer", Min = 1, Max = 8,  Value = 1 },
+    { Name = "Default Button",    Type = "integer", Min = 0, Max = 32, Value = 1 },
+    { Name = "Allow Deselect",    Type = "enum", Choices = { "No", "Yes" }, Value = "No" },
+    { Name = "Transition",        Type = "enum", Choices = { "none", "fade", "left", "right", "up", "down" }, Value = "none" },
+  }
+end
+
+function GetControls(props)
+  local n = props["Button Count"].Value
+  local l = props["Layers Per Button"].Value
+  local ctls = {
+    { Name = "Controller", ControlType = "Text",                          UserPin = true, PinStyle = "Both",   Count = 1 },
+    { Name = "Refresh",    ControlType = "Button", ButtonType = "Trigger", UserPin = true, PinStyle = "Both",   Count = 1 },
+    { Name = "Status",     ControlType = "Indicator", IndicatorType = "Text", UserPin = true, PinStyle = "Output", Count = 1 },
+    -- per button
+    { Name = "Select",  ControlType = "Button", ButtonType = "Toggle",  UserPin = true, PinStyle = "Both",   Count = n },
+    { Name = "TrigIn",  ControlType = "Button", ButtonType = "Trigger", UserPin = true, PinStyle = "Both",   Count = n },
+    { Name = "TrigOut", ControlType = "Button", ButtonType = "Trigger", UserPin = true, PinStyle = "Output", Count = n },
+  }
+  for b = 1, n do
+    table.insert(ctls, { Name = "B" .. b .. "Layer", ControlType = "Text", UserPin = true, PinStyle = "Both", Count = l })
+  end
+  return ctls
+end
+
+function GetControlLayout(props)
+  local n = props["Button Count"].Value
+  local l = props["Layers Per Button"].Value
+  local layout = {}
+  local graphics = {}
+
+  local colSel, colTin, colTout, colLay = 34, 100, 154, 214
+  local layW = 150
+  local BW = math.max(560, colLay + l * (layW + 4) + 6)
+
+  -- header: controller picker + refresh + status
+  table.insert(graphics, { Type = "GroupBox", Text = "UCI Layer Selector (drives a UCI Layer Controller - script access required)", Position = { 10, 10 }, Size = { BW, 48 }, StrokeWidth = 1, CornerRadius = 6, FontSize = 11 })
+  table.insert(graphics, { Type = "Text", Text = "Controller:", Position = { 12, 28 }, Size = { 62, 20 }, FontSize = 10, HTextAlign = "Right" })
+  layout["Controller"] = { PrettyName = "Layer Controller", Style = "ComboBox", Position = { 78, 26 }, Size = { 240, 22 }, FontSize = 10 }
+  layout["Refresh"]    = { PrettyName = "Refresh", Style = "Button", Legend = "Refresh", Position = { 326, 26 }, Size = { 78, 22 }, FontSize = 9 }
+  layout["Status"]     = { PrettyName = "Status", Style = "Text", Position = { 410, 26 }, Size = { BW - 410 - 6, 22 }, FontSize = 9, IsReadOnly = true }
+
+  -- button rows
+  table.insert(graphics, { Type = "GroupBox", Text = "Buttons  (one hot at a time)", Position = { 10, 66 }, Size = { BW, 30 + n * 28 }, StrokeWidth = 1, CornerRadius = 6, FontSize = 11 })
+  table.insert(graphics, { Type = "Text", Text = "Sel",   Position = { colSel, 82 }, Size = { 60, 12 }, FontSize = 8, HTextAlign = "Center" })
+  table.insert(graphics, { Type = "Text", Text = "TrIn",  Position = { colTin, 82 }, Size = { 50, 12 }, FontSize = 8, HTextAlign = "Center" })
+  table.insert(graphics, { Type = "Text", Text = "TrOut", Position = { colTout, 82 }, Size = { 50, 12 }, FontSize = 8, HTextAlign = "Center" })
+  for j = 1, l do
+    table.insert(graphics, { Type = "Text", Text = "Layer " .. j, Position = { colLay + (j - 1) * (layW + 4), 82 }, Size = { layW, 12 }, FontSize = 8, HTextAlign = "Center" })
+  end
+
+  for b = 1, n do
+    local y = 98 + (b - 1) * 28
+    local sfx = (n > 1) and (" " .. b) or ""
+    table.insert(graphics, { Type = "Text", Text = tostring(b), Position = { 16, y + 4 }, Size = { 16, 14 }, FontSize = 8, HTextAlign = "Center" })
+    layout["Select" .. sfx]  = { PrettyName = "Button " .. b .. "~Select", Style = "Button", Legend = tostring(b), Position = { colSel, y }, Size = { 60, 22 }, FontSize = 10, Color = { 60, 90, 140 } }
+    layout["TrigIn" .. sfx]  = { PrettyName = "Button " .. b .. "~Trig In", Style = "Button", Legend = "In", Position = { colTin, y }, Size = { 50, 22 }, FontSize = 8 }
+    layout["TrigOut" .. sfx] = { PrettyName = "Button " .. b .. "~Trig Out", Style = "Button", Legend = "Out", Position = { colTout, y }, Size = { 50, 22 }, FontSize = 8 }
+    for j = 1, l do
+      local isfx = (l > 1) and (" " .. j) or ""
+      layout["B" .. b .. "Layer" .. isfx] = { PrettyName = "Button " .. b .. "~Layer " .. j, Style = "ComboBox", Position = { colLay + (j - 1) * (layW + 4), y }, Size = { layW, 22 }, FontSize = 9 }
+    end
+  end
+
+  return layout, graphics
+end
+
+--=============================================================================
+-- Runtime
+--=============================================================================
+if Controls then
+
+  local N = Properties["Button Count"].Value
+  local L = Properties["Layers Per Button"].Value
+  local DEFAULT = Properties["Default Button"].Value
+  local ALLOW_DESELECT = Properties["Allow Deselect"].Value == "Yes"
+  local TRANSITION = Properties["Transition"].Value or "none"
+  local NONE = "-- none --"
+
+  local selected = nil
+  local comp = nil          -- the bound UCI Layer Controller component
+  local allLayers = {}      -- every layer name on the bound controller
+
+  local function arr(name, i, cnt)
+    local c = Controls[name]
+    if cnt == 1 then return c end
+    return c[i]
+  end
+  local function Bsel(b)  return arr("Select", b, N) end
+  local function BtiN(b)  return arr("TrigIn", b, N) end
+  local function BtoUT(b) return arr("TrigOut", b, N) end
+  local function Lay(b, j)
+    local c = Controls["B" .. b .. "Layer"]
+    if L == 1 then return c end
+    return c[j]
+  end
+
+  ---------------------------------------------------------------------------
+  -- Find UCI Layer Controllers (any component exposing "*.visibility")
+  ---------------------------------------------------------------------------
+  local function layersOf(name)
+    local out = {}
+    local ok, ctls = pcall(function() return Component.GetControls(name) end)
+    if ok and ctls then
+      for _, ct in ipairs(ctls) do
+        local layer = tostring(ct.Name):match("^(.+)%.visibility$")
+        if layer then out[#out + 1] = layer end
+      end
+    end
+    return out
+  end
+
+  local function findControllers()
+    local found = {}
+    local ok, comps = pcall(function() return Component.GetComponents() end)
+    if ok and comps then
+      for _, c in ipairs(comps) do
+        if #layersOf(c.Name) > 0 then found[#found + 1] = c.Name end
+      end
+    end
+    return found
+  end
+
+  ---------------------------------------------------------------------------
+  -- Bind + enumerate the chosen controller's layers into the dropdowns
+  ---------------------------------------------------------------------------
+  local function rebind()
+    comp = nil
+    local name = Controls.Controller.String
+    if name == "" or name == NONE then return end
+    local ok, c = pcall(function() return Component.New(name) end)
+    if ok then comp = c end
+  end
+
+  local function buildChoices()
+    local layers = {}
+    local name = Controls.Controller.String
+    if name ~= "" and name ~= NONE then layers = layersOf(name) end
+    allLayers = layers
+    local choices = { NONE }
+    for _, nm in ipairs(layers) do choices[#choices + 1] = nm end
+    for b = 1, N do
+      for j = 1, L do Lay(b, j).Choices = choices end
+    end
+    Controls.Status.String = (name ~= "" and name ~= NONE and name or "pick a controller") .. " | " .. #layers .. " layers"
+    return #layers
+  end
+
+  local function refreshControllers()
+    local found = findControllers()
+    local choices = { NONE }
+    for _, nm in ipairs(found) do choices[#choices + 1] = nm end
+    Controls.Controller.Choices = choices
+    -- auto-pick if exactly one and nothing chosen yet
+    if (Controls.Controller.String == "" or Controls.Controller.String == NONE) and #found == 1 then
+      Controls.Controller.String = found[1]
+    end
+    rebind()
+    buildChoices()
+  end
+
+  ---------------------------------------------------------------------------
+  -- Drive a layer's visibility (+ transition) on the bound component
+  ---------------------------------------------------------------------------
+  local function setVis(layer, on)
+    if not comp or layer == nil or layer == "" or layer == NONE then return end
+    local tr = comp[layer .. ".transition"]
+    if tr then tr.String = TRANSITION end
+    local v = comp[layer .. ".visibility"]
+    if v then v.Boolean = on end
+  end
+
+  ---------------------------------------------------------------------------
+  -- Selection logic
+  ---------------------------------------------------------------------------
+  local function entryAt(b, j)
+    local s = Lay(b, j).String
+    if s == "" or s == NONE then return nil end
+    return s
+  end
+
+  local function applyLayers(active)
+    if not comp then return end
+    -- hide EVERY layer on the controller first...
+    for _, lyr in ipairs(allLayers) do setVis(lyr, false) end
+    -- ...then show only the active button's picks
+    if active then
+      for j = 1, L do local e = entryAt(active, j); if e then setVis(e, true) end end
+    end
+  end
+
+  local function selectButton(b)
+    selected = b
+    for k = 1, N do Bsel(k).Boolean = (k == b) end   -- script writes don't re-fire handlers
+    applyLayers(b)
+    if b then BtoUT(b):Trigger() end
+  end
+
+  local function selectNone()
+    selected = nil
+    for k = 1, N do Bsel(k).Boolean = false end
+    applyLayers(nil)
+  end
+
+  ---------------------------------------------------------------------------
+  -- Wire up
+  ---------------------------------------------------------------------------
+  Controls.Refresh.EventHandler = refreshControllers
+
+  Controls.Controller.EventHandler = function()
+    rebind()
+    buildChoices()
+    applyLayers(selected)
+  end
+
+  for b = 1, N do
+    Bsel(b).EventHandler = function(ctl)
+      if ctl.Boolean then
+        selectButton(b)
+      elseif ALLOW_DESELECT then
+        selectNone()
+      else
+        Bsel(b).Boolean = true   -- sticky radio: keep one hot (no handler re-fire)
+      end
+    end
+    BtiN(b).EventHandler = function() selectButton(b) end
+    for j = 1, L do
+      Lay(b, j).EventHandler = function()
+        if selected == b then applyLayers(b) end
+      end
+    end
+  end
+
+  ---------------------------------------------------------------------------
+  -- Startup
+  ---------------------------------------------------------------------------
+  refreshControllers()
+
+  local saved = nil
+  for k = 1, N do if Bsel(k).Boolean then saved = k; break end end
+  if saved then
+    selectButton(saved)
+  elseif DEFAULT >= 1 and DEFAULT <= N then
+    selectButton(DEFAULT)
+  else
+    applyLayers(nil)
+  end
+
+end

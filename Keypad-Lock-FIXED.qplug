@@ -1,0 +1,601 @@
+--[[----------------------------------------------------------------------------
+                                 Keypad Lock
+
+                                 1     2     3
+                                 4     5     6
+                                 7     8     9
+                                 C     0    Back
+
+                    Designed by Veronica Martinez
+                    Programmed by Jason Martinez
+                    A husband & wife collaboration
+
+    Plugin conversion of the original "Keypad-Lock" user component.
+    Variable-length code entry: type any number of digits, press Enter to check.
+------------------------------------------------------------------------------]]
+
+PluginInfo = {
+  Name = "Martinez~Keypad Lock",
+  Version = "2.2.1.0",
+  Id = "com.martinez.keypadlock.2000",
+  Description = "Variable-length PIN keypad lock with lockout timer, masked entry and status LEDs. Designed by Veronica Martinez & programmed by Jason Martinez - a husband & wife collaboration.",
+  Author = "Jason Martinez",
+  ShowDebug = true,
+}
+
+-- Reusable colors
+local Colors = {
+  White      = { 245, 245, 245 },
+  Black      = { 30, 30, 30 },
+  GroupFill  = { 236, 236, 240 },
+  Green      = { 80, 200, 120 },
+  Red        = { 230, 70, 70 },
+  Blue       = { 65, 105, 225 },
+  Purple     = { 150, 110, 190 },
+  Teal       = { 40, 150, 160 },
+  KeyFace    = { 70, 70, 70 },
+  KeyClear   = { 190, 120, 60 },
+  KeyBack    = { 120, 90, 150 },
+}
+
+function GetColor(props)
+  return Colors.Purple
+end
+
+function GetPrettyName(props)
+  return "Keypad Lock " .. PluginInfo.Version
+end
+
+--------------------------------------------------------------------------------
+-- Properties (design-time configuration)
+--------------------------------------------------------------------------------
+function GetProperties()
+  local props = {}
+  table.insert(props, {
+    Name = "Default Password",
+    Type = "string",
+    Value = "1234",
+  })
+  table.insert(props, {
+    Name = "Default Timer (sec)",
+    Type = "integer",
+    Min = 0,
+    Max = 3599,
+    Value = 60,
+  })
+  table.insert(props, {
+    Name = "Mask Character",
+    Type = "string",
+    Value = "*",
+  })
+  table.insert(props, {
+    Name = "Timer Active at Start",
+    Type = "enum",
+    Choices = { "Yes", "No" },
+    Value = "No",
+  })
+  table.insert(props, {
+    Name = "Hide Text at Start",
+    Type = "enum",
+    Choices = { "Yes", "No" },
+    Value = "No",
+  })
+  table.insert(props, {
+    Name = "Auto Enter at Start",
+    Type = "enum",
+    Choices = { "Yes", "No" },
+    Value = "No",
+  })
+  return props
+end
+
+--------------------------------------------------------------------------------
+-- Controls
+--------------------------------------------------------------------------------
+function GetControls(props)
+  local ctls = {}
+
+  -- Keypad digits (index 1-9 = "1".."9", index 10 = "0")
+  table.insert(ctls, { Name = "digit", ControlType = "Button", ButtonType = "Momentary", Count = 10, PinStyle = "Input", UserPin = true })
+  table.insert(ctls, { Name = "clear", ControlType = "Button", ButtonType = "Trigger", Count = 1, PinStyle = "Input", UserPin = true })
+  table.insert(ctls, { Name = "backspace", ControlType = "Button", ButtonType = "Momentary", Count = 1, PinStyle = "Input", UserPin = true })
+  table.insert(ctls, { Name = "enter", ControlType = "Button", ButtonType = "Momentary", Count = 1, PinStyle = "Both", UserPin = true })
+  table.insert(ctls, { Name = "autoEnter", ControlType = "Button", ButtonType = "Toggle", Count = 1, PinStyle = "Both", UserPin = true })
+  table.insert(ctls, { Name = "startAutoEnter", ControlType = "Text", Count = 1 })
+  table.insert(ctls, { Name = "initialized", ControlType = "Text", Count = 1 }) -- hidden: marks first-ever load
+
+  -- Password (user-set) and readouts
+  table.insert(ctls, { Name = "password", ControlType = "Text", Count = 1, PinStyle = "Both", UserPin = true })
+  table.insert(ctls, { Name = "entryText", ControlType = "Indicator", IndicatorType = "Text", Count = 1, PinStyle = "Output", UserPin = true })
+  table.insert(ctls, { Name = "hiddenText", ControlType = "Indicator", IndicatorType = "Text", Count = 1, PinStyle = "Output", UserPin = true })
+  table.insert(ctls, { Name = "lastButton", ControlType = "Indicator", IndicatorType = "Text", Count = 1 })
+  table.insert(ctls, { Name = "entryLength", ControlType = "Indicator", IndicatorType = "Text", Count = 1 })
+
+  -- Text visibility
+  table.insert(ctls, { Name = "hideText", ControlType = "Button", ButtonType = "Toggle", Count = 1, PinStyle = "Both", UserPin = true })
+  table.insert(ctls, { Name = "startHideText", ControlType = "Text", Count = 1 })
+
+  -- Timer
+  table.insert(ctls, { Name = "timer", ControlType = "Knob", ControlUnit = "Integer", Min = 0, Max = 3599, Count = 1, PinStyle = "Both", UserPin = true })
+  table.insert(ctls, { Name = "timerDisplay", ControlType = "Indicator", IndicatorType = "Text", Count = 1, PinStyle = "Output", UserPin = true })
+  table.insert(ctls, { Name = "timerActive", ControlType = "Button", ButtonType = "Toggle", Count = 1, PinStyle = "Both", UserPin = true })
+  table.insert(ctls, { Name = "startTimerActive", ControlType = "Text", Count = 1 })
+  table.insert(ctls, { Name = "restartTimer", ControlType = "Button", ButtonType = "Trigger", Count = 1, PinStyle = "Input", UserPin = true })
+  table.insert(ctls, { Name = "instantTimerEnd", ControlType = "Button", ButtonType = "Trigger", Count = 1, PinStyle = "Input", UserPin = true })
+
+  -- Status LEDs
+  table.insert(ctls, { Name = "passwordCorrect", ControlType = "Indicator", IndicatorType = "Led", Count = 1, PinStyle = "Output", UserPin = true })
+  table.insert(ctls, { Name = "passwordIncorrect", ControlType = "Indicator", IndicatorType = "Led", Count = 1, PinStyle = "Output", UserPin = true })
+  table.insert(ctls, { Name = "timerExpired", ControlType = "Indicator", IndicatorType = "Led", Count = 1, PinStyle = "Output", UserPin = true })
+
+  return ctls
+end
+
+--------------------------------------------------------------------------------
+-- Control Layout + Graphics
+--------------------------------------------------------------------------------
+function GetControlLayout(props)
+  local layout = {}
+  local graphics = {}
+
+  local function group(text, x, y, w, h)
+    table.insert(graphics, {
+      Type = "GroupBox", Text = text, HTextAlign = "Center",
+      Fill = Colors.GroupFill, CornerRadius = 8,
+      StrokeColor = Colors.Black, StrokeWidth = 1,
+      Position = { x, y }, Size = { w, h },
+    })
+  end
+
+  local function label(text, x, y, w, h)
+    table.insert(graphics, {
+      Type = "Text", Text = text, Font = "Roboto", FontSize = 11,
+      HTextAlign = "Center", Color = Colors.Black,
+      Position = { x, y }, Size = { w, h },
+    })
+  end
+
+  -- Outer background
+  table.insert(graphics, {
+    Type = "GroupBox", Fill = { 250, 250, 252 }, CornerRadius = 10,
+    StrokeColor = Colors.Purple, StrokeWidth = 2,
+    Position = { 0, 0 }, Size = { 648, 566 },
+  })
+
+  ----------------------------------------------------------------------
+  -- LEFT COLUMN
+  ----------------------------------------------------------------------
+  -- User Password
+  group("User Password", 8, 8, 200, 92)
+  layout["password"] = {
+    PrettyName = "Config~User Password", Style = "Text",
+    HTextAlign = "Center", FontSize = 16,
+    Fill = { 40, 30, 80 }, Color = Colors.White,
+    Position = { 24, 44 }, Size = { 168, 44 },
+  }
+
+  -- Default Settings
+  group("Default Settings", 8, 108, 200, 150)
+  label("Auto Enter", 24, 130, 168, 14)
+  layout["startAutoEnter"] = {
+    PrettyName = "Config~Auto Enter Default", Style = "ComboBox",
+    Position = { 56, 145 }, Size = { 96, 22 },
+  }
+  label("Timer Active", 24, 172, 168, 14)
+  layout["startTimerActive"] = {
+    PrettyName = "Config~Timer Active Default", Style = "ComboBox",
+    Position = { 56, 187 }, Size = { 96, 22 },
+  }
+  label("Hide Text", 24, 214, 168, 14)
+  layout["startHideText"] = {
+    PrettyName = "Config~Hide Text Default", Style = "ComboBox",
+    Position = { 56, 229 }, Size = { 96, 22 },
+  }
+
+  -- LEDs
+  group("LEDs", 8, 266, 200, 258)
+  label("Password Correct", 24, 296, 168, 16)
+  layout["passwordCorrect"] = {
+    PrettyName = "Status~Password Correct", Style = "LED",
+    Color = Colors.Green, UnlinkOffColor = false,
+    Position = { 92, 318 }, Size = { 28, 28 },
+  }
+  label("Password Incorrect", 24, 366, 168, 16)
+  layout["passwordIncorrect"] = {
+    PrettyName = "Status~Password Incorrect", Style = "LED",
+    Color = Colors.Red, UnlinkOffColor = false,
+    Position = { 92, 388 }, Size = { 28, 28 },
+  }
+  label("Timer Expired", 24, 436, 168, 16)
+  layout["timerExpired"] = {
+    PrettyName = "Status~Timer Expired", Style = "LED",
+    Color = Colors.Blue, UnlinkOffColor = false,
+    Position = { 92, 458 }, Size = { 28, 28 },
+  }
+
+  ----------------------------------------------------------------------
+  -- MIDDLE COLUMN
+  ----------------------------------------------------------------------
+  -- Enter
+  group("Enter", 224, 8, 200, 92)
+  layout["enter"] = {
+    PrettyName = "Keypad~Enter", Style = "Button", ButtonStyle = "Momentary",
+    Legend = "Enter", FontSize = 13, CornerRadius = 4,
+    Color = Colors.Teal, UnlinkOffColor = false,
+    Position = { 248, 38 }, Size = { 152, 24 },
+  }
+  layout["autoEnter"] = {
+    PrettyName = "Keypad~Auto Enter", Style = "Button", ButtonStyle = "Toggle",
+    Legend = "Auto Enter", FontSize = 12, CornerRadius = 4,
+    Color = Colors.Teal, UnlinkOffColor = false,
+    Position = { 248, 66 }, Size = { 152, 24 },
+  }
+
+  -- Timer
+  group("Timer", 224, 108, 200, 150)
+  layout["timerDisplay"] = {
+    PrettyName = "Timer~Display", Style = "Text",
+    HTextAlign = "Center", FontSize = 16,
+    Fill = { 45, 35, 30 }, Color = Colors.White,
+    Position = { 244, 140 }, Size = { 96, 30 },
+  }
+  layout["timer"] = {
+    PrettyName = "Timer~Duration", Style = "Knob",
+    Position = { 350, 132 }, Size = { 50, 50 },
+  }
+  layout["timerActive"] = {
+    PrettyName = "Timer~Active", Style = "Button", ButtonStyle = "Toggle",
+    Legend = "Timer Active", FontSize = 11, CornerRadius = 4,
+    Color = Colors.Green, UnlinkOffColor = false,
+    Position = { 244, 178 }, Size = { 156, 24 },
+  }
+  layout["restartTimer"] = {
+    PrettyName = "Timer~Restart", Style = "Button", ButtonStyle = "Trigger",
+    Legend = "Restart", FontSize = 11, CornerRadius = 4,
+    Position = { 244, 206 }, Size = { 76, 24 },
+  }
+  layout["instantTimerEnd"] = {
+    PrettyName = "Timer~Instant End", Style = "Button", ButtonStyle = "Trigger",
+    Legend = "Instant End", FontSize = 11, CornerRadius = 4,
+    Position = { 324, 206 }, Size = { 76, 24 },
+  }
+
+  -- Hide Text
+  group("Hide Text", 224, 266, 200, 66)
+  layout["hideText"] = {
+    PrettyName = "Config~Hide Text", Style = "Button", ButtonStyle = "Toggle",
+    Legend = "Hide Text", FontSize = 12, CornerRadius = 4,
+    Color = Colors.Purple, UnlinkOffColor = false,
+    Position = { 244, 296 }, Size = { 156, 28 },
+  }
+
+  -- Button Presses
+  group("Button Presses", 224, 340, 200, 184)
+  label("Last Button", 244, 372, 156, 16)
+  layout["lastButton"] = {
+    PrettyName = "Status~Last Button", Style = "Text",
+    HTextAlign = "Center", FontSize = 16,
+    Fill = Colors.Black, Color = Colors.White,
+    Position = { 284, 392 }, Size = { 76, 28 },
+  }
+  label("Entry Length", 244, 434, 156, 16)
+  layout["entryLength"] = {
+    PrettyName = "Status~Entry Length", Style = "Text",
+    HTextAlign = "Center", FontSize = 16,
+    Fill = Colors.Black, Color = Colors.White,
+    Position = { 284, 454 }, Size = { 76, 28 },
+  }
+
+  ----------------------------------------------------------------------
+  -- RIGHT COLUMN - Keypad
+  ----------------------------------------------------------------------
+  group("Numeric Keypad", 440, 8, 200, 316)
+
+  -- Plain (regular) readout
+  layout["entryText"] = {
+    PrettyName = "Display~Entry (plain)", Style = "Text",
+    HTextAlign = "Center", FontSize = 18,
+    Fill = { 235, 225, 245 }, Color = Colors.Black,
+    Position = { 464, 42 }, Size = { 152, 34 },
+  }
+
+  -- Digit / control buttons (3 x 4 grid)
+  local col = { 472, 516, 560 }
+  local rowY = { 118, 162, 206, 250 }
+  local digitLegend = { "1", "2", "3", "4", "5", "6", "7", "8", "9", "0" }
+  local digitPos = {
+    { col[1], rowY[1] }, { col[2], rowY[1] }, { col[3], rowY[1] },
+    { col[1], rowY[2] }, { col[2], rowY[2] }, { col[3], rowY[2] },
+    { col[1], rowY[3] }, { col[2], rowY[3] }, { col[3], rowY[3] },
+    { col[2], rowY[4] }, -- "0"
+  }
+  for i = 1, 10 do
+    layout["digit " .. i] = {
+      PrettyName = "Keypad~" .. digitLegend[i], Style = "Button",
+      ButtonStyle = "Momentary", Legend = digitLegend[i], FontSize = 18,
+      CornerRadius = 6, Color = Colors.KeyFace, UnlinkOffColor = false,
+      Position = digitPos[i], Size = { 40, 40 },
+    }
+  end
+  layout["clear"] = {
+    PrettyName = "Keypad~Clear", Style = "Button", ButtonStyle = "Trigger",
+    Legend = "C", FontSize = 18, CornerRadius = 6, Color = Colors.KeyClear,
+    Position = { col[1], rowY[4] }, Size = { 40, 40 },
+  }
+  layout["backspace"] = {
+    PrettyName = "Keypad~Backspace", Style = "Button", ButtonStyle = "Momentary",
+    Legend = "Back", FontSize = 12, CornerRadius = 6, Color = Colors.KeyBack,
+    UnlinkOffColor = false, Position = { col[3], rowY[4] }, Size = { 40, 40 },
+  }
+
+  -- Hidden (masked) readout
+  group("Hidden (Masked) Entry", 440, 332, 200, 76)
+  layout["hiddenText"] = {
+    PrettyName = "Display~Entry (masked)", Style = "Text",
+    HTextAlign = "Center", FontSize = 18,
+    Fill = { 25, 25, 25 }, Color = Colors.White,
+    Position = { 464, 366 }, Size = { 152, 34 },
+  }
+
+  ----------------------------------------------------------------------
+  -- Credit footer
+  ----------------------------------------------------------------------
+  table.insert(graphics, {
+    Type = "Text",
+    Text = "Designed by Veronica Martinez   -   Programmed by Jason Martinez   -   A husband & wife collaboration",
+    Font = "Roboto", FontStyle = "Italic", FontSize = 11,
+    HTextAlign = "Center", Color = Colors.Purple,
+    Position = { 8, 536 }, Size = { 632, 20 },
+  })
+
+  return layout, graphics
+end
+
+--------------------------------------------------------------------------------
+-- Runtime control code
+--------------------------------------------------------------------------------
+if Controls then
+
+  ---- config from properties (with safe fallbacks) ----
+  local function getProp(name, default)
+    local ok, v = pcall(function()
+      if Properties and Properties[name] ~= nil then return Properties[name].Value end
+      return nil
+    end)
+    if ok and v ~= nil then return v end
+    return default
+  end
+
+  local DefaultPassword = tostring(getProp("Default Password", "1234"))
+  local DefaultTimerSec = tonumber(getProp("Default Timer (sec)", 60)) or 60
+  local MaskChar = tostring(getProp("Mask Character", "*"))
+  if #MaskChar < 1 then MaskChar = "*" end
+  MaskChar = MaskChar:sub(1, 1)
+
+  ---- state ----
+  local entry = ""
+  local remaining = 0
+  local lockTimer = Timer.New()
+  local digitChars = { "1", "2", "3", "4", "5", "6", "7", "8", "9", "0" }
+
+  ---- helpers ----
+  local function fmtTime(sec)
+    sec = math.max(0, math.floor(sec + 0.5))
+    return string.format("%02d:%02d:%02d",
+      math.floor(sec / 3600), math.floor((sec % 3600) / 60), sec % 60)
+  end
+
+  local function refresh()
+    Controls.entryText.String = entry
+    Controls.hiddenText.String = string.rep(MaskChar, #entry)
+    Controls.entryLength.String = tostring(#entry)
+  end
+
+  -- Auto-enter target: length of the current (or default) password
+  local function targetLen()
+    local pw = Controls.password.String
+    if pw == "" then pw = DefaultPassword end
+    return #pw
+  end
+
+  local function setKeypadLocked(locked)
+    for i = 1, 10 do Controls.digit[i].IsDisabled = locked end
+    Controls.clear.IsDisabled = locked
+    Controls.backspace.IsDisabled = locked
+    Controls.enter.IsDisabled = locked
+  end
+
+  local function clearLeds()
+    Controls.passwordCorrect.Boolean = false
+    Controls.passwordIncorrect.Boolean = false
+  end
+
+  local function applyHideText(hide)
+    Controls.entryText.IsInvisible = hide
+  end
+
+  ---- timer ----
+  local function stopTimer()
+    lockTimer:Stop()
+    setKeypadLocked(false)
+  end
+
+  local function startTimer()
+    remaining = Controls.timer.Value
+    if remaining <= 0 then remaining = DefaultTimerSec end
+    Controls.timerExpired.Boolean = false
+    Controls.timerDisplay.String = fmtTime(remaining)
+    setKeypadLocked(true)
+    lockTimer:Start(0.1)
+  end
+
+  lockTimer.EventHandler = function()
+    remaining = remaining - 0.1
+    if remaining <= 0 then
+      remaining = 0
+      lockTimer:Stop()
+      Controls.timerDisplay.String = fmtTime(0)
+      Controls.timerExpired.Boolean = true
+      -- NOTE: do NOT clear timerActive here. It is the persistent "auto-start on
+      -- correct password" mode; clearing it made the timer fire only once.
+      clearLeds()
+      setKeypadLocked(false)
+    else
+      Controls.timerDisplay.String = fmtTime(remaining)
+    end
+  end
+
+  ---- password check ----
+  local function checkPassword()
+    local pw = Controls.password.String
+    if pw == "" then pw = DefaultPassword end
+    if entry == pw then
+      Controls.passwordCorrect.Boolean = true
+      Controls.passwordIncorrect.Boolean = false
+      Controls.entryText.String = "Correct"
+      Controls.hiddenText.String = "Correct"
+      if Controls.timerActive.Boolean then startTimer() end
+    else
+      Controls.passwordCorrect.Boolean = false
+      Controls.passwordIncorrect.Boolean = true
+      Controls.entryText.String = "Incorrect"
+      Controls.hiddenText.String = "Incorrect"
+    end
+    entry = ""
+    Controls.entryLength.String = "0"
+    Timer.CallAfter(function() refresh() end, 1.0)
+  end
+
+  ---- event handlers ----
+  for i = 1, 10 do
+    Controls.digit[i].EventHandler = function(ctl)
+      if ctl.Boolean then
+        entry = entry .. digitChars[i]
+        Controls.lastButton.String = digitChars[i]
+        clearLeds()
+        refresh()
+        -- Auto Enter: submit once entry reaches the password's length
+        local n = targetLen()
+        if Controls.autoEnter.Boolean and n > 0 and #entry >= n then
+          Timer.CallAfter(function() checkPassword() end, 0.2)
+        end
+      end
+    end
+  end
+
+  Controls.backspace.EventHandler = function(ctl)
+    if ctl.Boolean then
+      entry = string.sub(entry, 1, #entry - 1)
+      clearLeds()
+      refresh()
+    end
+  end
+
+  Controls.clear.EventHandler = function()
+    entry = ""
+    Controls.lastButton.String = ""
+    clearLeds()
+    refresh()
+  end
+
+  Controls.enter.EventHandler = function(ctl)
+    if ctl.Boolean then checkPassword() end
+  end
+
+  Controls.autoEnter.EventHandler = function(ctl)
+    Controls.startAutoEnter.String = ctl.Boolean and "Yes" or "No"
+  end
+
+  Controls.startAutoEnter.EventHandler = function(ctl)
+    Controls.autoEnter.Boolean = (ctl.String == "Yes")
+  end
+
+  Controls.hideText.EventHandler = function(ctl)
+    applyHideText(ctl.Boolean)
+    Controls.startHideText.String = ctl.Boolean and "Yes" or "No"
+  end
+
+  Controls.timerActive.EventHandler = function(ctl)
+    if ctl.Boolean then
+      startTimer()
+    else
+      stopTimer()
+      Controls.timerExpired.Boolean = false
+    end
+    Controls.startTimerActive.String = ctl.Boolean and "Yes" or "No"
+  end
+
+  Controls.restartTimer.EventHandler = function()
+    Controls.timerActive.Boolean = true
+    Controls.startTimerActive.String = "Yes"
+    startTimer()
+  end
+
+  Controls.instantTimerEnd.EventHandler = function()
+    remaining = 0
+    lockTimer:Stop()
+    Controls.timerDisplay.String = fmtTime(0)
+    Controls.timerExpired.Boolean = true
+    -- keep the auto-start mode armed so the next correct password re-starts it
+    clearLeds()
+    setKeypadLocked(false)
+  end
+
+  Controls.timer.EventHandler = function(ctl)
+    Controls.timerDisplay.String = fmtTime(ctl.Value)
+  end
+
+  Controls.startTimerActive.EventHandler = function(ctl)
+    local on = (ctl.String == "Yes")
+    Controls.timerActive.Boolean = on
+    if on then startTimer() else stopTimer() Controls.timerExpired.Boolean = false end
+  end
+
+  Controls.startHideText.EventHandler = function(ctl)
+    local hide = (ctl.String == "Yes")
+    Controls.hideText.Boolean = hide
+    applyHideText(hide)
+  end
+
+  ---- initialization ----
+  Controls.startAutoEnter.Choices = { "Yes", "No" }
+  Controls.startTimerActive.Choices = { "Yes", "No" }
+  Controls.startHideText.Choices = { "Yes", "No" }
+
+  -- Password / timer always fall back to a sane value if blank
+  if Controls.password.String == "" then Controls.password.String = DefaultPassword end
+  if Controls.timer.Value <= 0 then Controls.timer.Value = DefaultTimerSec end
+
+  -- FIRST-RUN SEEDING ONLY.
+  -- The property "... at Start" values are meant to set the initial defaults the
+  -- first time the plugin is ever placed. On every online/offline after that we
+  -- must NOT touch these toggles, or Q-SYS's restored (saved) settings get wiped.
+  -- A hidden persisted flag ("initialized") tells us which case we are in.
+  local firstRun = (Controls.initialized.String ~= "1")
+  if firstRun then
+    Controls.initialized.String = "1"
+    Controls.autoEnter.Boolean   = (tostring(getProp("Auto Enter at Start",   "No")) == "Yes")
+    Controls.hideText.Boolean    = (tostring(getProp("Hide Text at Start",     "No")) == "Yes")
+    Controls.timerActive.Boolean = (tostring(getProp("Timer Active at Start",  "No")) == "Yes")
+  end
+
+  -- Sync the mirror combo boxes + text visibility to the (now-correct) live state,
+  -- whether that came from first-run seeding or from the user's saved settings.
+  Controls.startAutoEnter.String   = Controls.autoEnter.Boolean   and "Yes" or "No"
+  Controls.startHideText.String    = Controls.hideText.Boolean    and "Yes" or "No"
+  Controls.startTimerActive.String = Controls.timerActive.Boolean and "Yes" or "No"
+  applyHideText(Controls.hideText.Boolean)
+
+  Controls.timerDisplay.String = fmtTime(Controls.timer.Value)
+  Controls.timerExpired.Boolean = false
+  Controls.lastButton.String = ""
+  clearLeds()
+  entry = ""
+  refresh()
+
+  -- If the timer was left active (saved on, or seeded on), (re)start it now
+  if Controls.timerActive.Boolean then
+    startTimer()
+  end
+
+end

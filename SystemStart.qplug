@@ -1,0 +1,84 @@
+-- System Start Plugin
+-- Dead simple boot block. A few seconds after the design STARTS RUNNING (real
+-- Core boot or Emulate) it asserts pins you can program off of:
+--
+--   * Value   - outputs the number you set
+--   * String  - outputs the string you set
+--   * True    - a boolean held HIGH
+--   * False   - a boolean held LOW
+--   * Trigger - pulses ONCE, Delay seconds after boot
+--
+-- The delay matters: a trigger fired during init doesn't propagate, so it's
+-- fired from a timer (default 5s) once everything is up.
+
+PluginInfo = {
+  Name = "Tech Tools~System Start",
+  Version = "2.1.0",
+  Id = "e1c7b4a9-3d62-4f58-9a06-2b8e5c7f9d13",
+  Author = "JSON",
+  Description = "Simple boot block: a few seconds after design start (Core boot or Emulate) it pulses a Trigger, plus a Value, String, True and False pin to program off of. Delay knob sets when the trigger fires (default 5s).",
+  ShowDebug = true,
+}
+
+function GetColor(props)
+  return { 40, 55, 75 }
+end
+
+function GetPrettyName(props)
+  return "System Start " .. PluginInfo.Version
+end
+
+function GetProperties()
+  return {}
+end
+
+function GetControls(props)
+  return {
+    { Name = "Delay",   ControlType = "Knob", ControlUnit = "Seconds", Min = 0, Max = 60, Value = 5, UserPin = true, PinStyle = "Both", Count = 1 },
+    { Name = "Value",   ControlType = "Knob", ControlUnit = "Float", Min = -100000, Max = 100000, UserPin = true, PinStyle = "Both",   Count = 1 },
+    { Name = "String",  ControlType = "Text",                                                       UserPin = true, PinStyle = "Both",   Count = 1 },
+    { Name = "True",    ControlType = "Indicator", IndicatorType = "Led",                           UserPin = true, PinStyle = "Output", Count = 1 },
+    { Name = "False",   ControlType = "Indicator", IndicatorType = "Led",                           UserPin = true, PinStyle = "Output", Count = 1 },
+    { Name = "Trigger", ControlType = "Button", ButtonType = "Trigger",                             UserPin = true, PinStyle = "Output", Count = 1 },
+  }
+end
+
+function GetControlLayout(props)
+  local layout, graphics = {}, {}
+
+  table.insert(graphics, { Type = "GroupBox", Text = "System Start (fires once after boot / emulate)", Position = { 10, 10 }, Size = { 360, 128 }, StrokeWidth = 1, CornerRadius = 6, FontSize = 11 })
+
+  layout["Trigger"] = { PrettyName = "Trigger", Style = "Button", Legend = "Start", Position = { 20, 32 }, Size = { 84, 26 }, FontSize = 10, Color = { 0, 110, 60 } }
+  table.insert(graphics, { Type = "Text", Text = "Delay s", Position = { 112, 20 }, Size = { 48, 12 }, FontSize = 8, HTextAlign = "Center" })
+  layout["Delay"] = { PrettyName = "Delay Seconds", Style = "Text", Position = { 112, 34 }, Size = { 48, 24 }, FontSize = 10, HTextAlign = "Center" }
+  table.insert(graphics, { Type = "Text", Text = "True", Position = { 176, 20 }, Size = { 40, 12 }, FontSize = 8, HTextAlign = "Center" })
+  layout["True"]  = { PrettyName = "True (out)",  Style = "Led", Position = { 190, 34 }, Size = { 18, 18 }, Color = { 0, 170, 80 } }
+  table.insert(graphics, { Type = "Text", Text = "False", Position = { 236, 20 }, Size = { 40, 12 }, FontSize = 8, HTextAlign = "Center" })
+  layout["False"] = { PrettyName = "False (out)", Style = "Led", Position = { 250, 34 }, Size = { 18, 18 }, Color = { 170, 60, 40 } }
+
+  table.insert(graphics, { Type = "Text", Text = "Value:", Position = { 20, 78 }, Size = { 54, 16 }, FontSize = 9, HTextAlign = "Right" })
+  layout["Value"]  = { PrettyName = "Value (out)", Style = "Text", Position = { 80, 76 }, Size = { 270, 22 }, FontSize = 10, HTextAlign = "Center" }
+  table.insert(graphics, { Type = "Text", Text = "String:", Position = { 20, 106 }, Size = { 54, 16 }, FontSize = 9, HTextAlign = "Right" })
+  layout["String"] = { PrettyName = "String (out)", Style = "Text", Position = { 80, 104 }, Size = { 270, 22 }, FontSize = 10 }
+
+  return layout, graphics
+end
+
+--=============================================================================
+-- Runtime  (runs at design start: Core boot, Emulate, or script reload)
+--=============================================================================
+if Controls then
+
+  -- held states can be asserted right away
+  Controls.True.Boolean  = true
+  Controls.False.Boolean = false
+
+  -- fire the trigger ONCE, Delay seconds after boot (a trigger fired during
+  -- init won't propagate - the timer defers it until the design is live)
+  local secs = Controls.Delay.Value or 5
+  Timer.CallAfter(function()
+    Controls.Trigger:Trigger()
+    print("[SystemStart] fired")
+  end, secs)
+
+end
